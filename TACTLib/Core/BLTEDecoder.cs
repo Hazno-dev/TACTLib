@@ -1,9 +1,11 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using TACTLib.Client;
+using TACTLib.Client.HandlerArgs;
 using TACTLib.Exceptions;
 using TACTLib.Helpers;
 
@@ -36,8 +38,22 @@ namespace TACTLib.Core
             ref var header = ref SpanHelper.ReadStruct<Header>(ref span);
             if (BitConverter.IsLittleEndian) header.m_frameHeaderSize = BinaryPrimitives.ReverseEndianness(header.m_frameHeaderSize);
 
-            if (header.m_magic != BLTEStream.Magic) throw new BLTEDecoderException(null, $"frame header mismatch (bad BLTE file) {header.m_magic:X}");
-            
+            if (header.m_magic != BLTEStream.Magic) {
+                header.m_frameHeaderSize = BinaryPrimitives.ReverseEndianness(header.m_frameHeaderSize);
+                if (src[0] == 0x78 && src[1] == 0xDA) {
+                    return [.. DecompressUnknownSize(src)];
+                }
+
+                ///xbox override
+                if (client?.CreateArgs.HandlerArgs is ClientCreateArgs_Tank tankArg) {
+                    if (tankArg.ManifestPlatform == "XSX") {
+                        return [.. src];
+                    }
+                }
+
+                throw new BLTEDecoderException(null, $"frame header mismatch (bad BLTE file) {header.m_magic:X}");
+            }
+
             scoped ReadOnlySpan<DataBlock> blocks;
             if (header.m_frameHeaderSize > 0)
             {
@@ -87,7 +103,7 @@ namespace TACTLib.Core
                 var blockOutput = SpanHelper.Advance(ref outputSlice, block.m_decodedSize);
                 HandleDataBlock(client, encodedBlockData, blockOutput, i);
             }
-            
+
             if (!outputSlice.IsEmpty)
             {
                 // don't let uninitialized data leak back to caller
@@ -131,7 +147,7 @@ namespace TACTLib.Core
             {
                 throw new Exception("ClientHandler was not passed to BLTEDecoder, decryption key lookup is not possible");
             }
-            
+
             var key = client.ConfigHandler.Keyring.GetKey(keyName);
             if (key == null)
                 throw new BLTEKeyException(keyName);
@@ -175,6 +191,42 @@ namespace TACTLib.Core
                 using var unmanagedInputStream = new UnmanagedMemoryStream(pBuffer, input.Length, input.Length, FileAccess.Read);
                 using var zlibStream = new ZLibStream(unmanagedInputStream, CompressionMode.Decompress);
                 zlibStream.DefinitelyRead(output);
+            }
+        }
+
+        public static ReadOnlySpan<byte> DecompressUnknownSize(ReadOnlySpan<byte> compressedSource)
+        {
+            // 1. Wrap the source span using unsafe memory stream to avoid array allocation
+            unsafe
+            {
+                fixed (byte* pBuffer = compressedSource)
+                {
+                    using var ms = new UnmanagedMemoryStream(pBuffer, compressedSource.Length);
+                    using var zlibStream = new ZLibStream(ms, CompressionMode.Decompress);
+
+                    // 2. Use a dynamic buffer writer to handle unknown sizes efficiently
+                    var bufferWriter = new ArrayBufferWriter<byte>(initialCapacity: compressedSource.Length * 2);
+
+                    // 3. Read chunks directly into the buffer writer's memory
+                    byte[] tempBuffer = ArrayPool<byte>.Shared.Rent(4096);
+                    try
+                    {
+                        int bytesRead;
+                        while ((bytesRead = zlibStream.Read(tempBuffer, 0, tempBuffer.Length)) > 0)
+                        {
+                            var span = bufferWriter.GetSpan(bytesRead);
+                            tempBuffer.AsSpan(0, bytesRead).CopyTo(span);
+                            bufferWriter.Advance(bytesRead);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(tempBuffer);
+                    }
+
+                    // Returns a perfect slice of exactly the decompressed bytes
+                    return bufferWriter.WrittenSpan;
+                }
             }
         }
     }

@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using TACTLib.Client;
 using TACTLib.Helpers;
 
 namespace TACTLib.Core.VFS {
@@ -154,7 +156,9 @@ namespace TACTLib.Core.VFS {
 
             public readonly List<VFSFile> Files;
 
-            public Manifest(ManifestHeader header) {
+            public readonly bool Root;
+
+            public Manifest(ClientHandler client, ManifestHeader header, bool root) {
                 Header = header;
 
                 Flags = header.GetFlags();
@@ -169,6 +173,8 @@ namespace TACTLib.Core.VFS {
                 //EstOffsSize = GetOffsetFieldSize(header.EstTableSize);
 
                 Files = new List<VFSFile>();
+
+                Root = root;
             }
 
             // Returns size of "container file table offset" files in the VFS.
@@ -199,7 +205,7 @@ namespace TACTLib.Core.VFS {
             return value;
         }
 
-        private static PathEntry ReadPathEntry(BinaryReader reader, long pathTableEnd) {
+        private static PathEntry ReadPathEntry(BinaryReader reader, long pathTableEnd, bool encodeStr) {
             var pathEntry = new PathEntry();
 
             var bBefore = PeekByte(reader);
@@ -210,7 +216,8 @@ namespace TACTLib.Core.VFS {
 
             if (reader.BaseStream.Position < pathTableEnd && bBefore != 0xFF) {
                 var length = reader.ReadByte();
-                pathEntry.Name = Encoding.UTF8.GetString(reader.ReadBytes(length));
+                //pathEntry.Name = Encoding.UTF8.GetString(reader.ReadBytes(length));
+                pathEntry.Name = encodeStr ? Encoding.UTF8.GetString(reader.ReadBytes(length)) : Convert.ToHexString(reader.ReadBytes(length));
             }
 
             var bAfter = PeekByte(reader);
@@ -235,20 +242,20 @@ namespace TACTLib.Core.VFS {
             return pathEntry;
         }
 
-        public static Manifest Read(BinaryReader reader) {
+        public static Manifest Read(ClientHandler client, BinaryReader reader, bool root) {
             var header = reader.Read<ManifestHeader>();
 			if (header.Magic != 0x53465654) {
 				throw new InvalidDataException();
 			}
 
-            Manifest manifest = new Manifest(header);
+            Manifest manifest = new Manifest(client, header, root);
 
-            ParseDirectoryData(manifest, reader);
+            ParseDirectoryData(client, manifest, reader);
 
             return manifest;
         }
 
-        private static void ParseDirectoryData(Manifest manifest, BinaryReader reader) {
+        private static void ParseDirectoryData(ClientHandler client, Manifest manifest, BinaryReader reader) {
             long rootDirPtr = manifest.PathTableOffset;
             var rootDirEnd = rootDirPtr + manifest.PathTableSize;
             if (manifest.PathTableOffset + 1 + sizeof(int) < rootDirEnd) {
@@ -271,16 +278,16 @@ namespace TACTLib.Core.VFS {
                 }
             }
 
-            ParsePathFileTable(manifest, reader, rootDirPtr, rootDirEnd, "");
+            ParsePathFileTable(client, manifest, reader, rootDirPtr, rootDirEnd, "");
         }
 
-        private static void ParsePathFileTable(Manifest manifest, BinaryReader reader, long pathTablePtr, long pathTableEnd, string pathBuffer) {
+        private static void ParsePathFileTable(ClientHandler client, Manifest manifest, BinaryReader reader, long pathTablePtr, long pathTableEnd, string pathBuffer) {
             reader.BaseStream.Position = pathTablePtr;
 
             string pathBufferBak = pathBuffer;
 
             while (reader.BaseStream.Position < pathTableEnd) {
-                var entry = ReadPathEntry(reader, pathTableEnd);
+                var entry = ReadPathEntry(reader, pathTableEnd, manifest.Root);
 
                 pathBuffer = AppendNodeToPath(entry, pathBuffer);
 
@@ -296,7 +303,7 @@ namespace TACTLib.Core.VFS {
                         Debug.Assert((entry.NodeValue & TVFS_FOLDER_SIZE_MASK) >= sizeof(int));
 
                         // Recursively call the folder parser on the same file
-                        ParsePathFileTable(manifest, reader, reader.BaseStream.Position, directoryEnd, pathBuffer);
+                        ParsePathFileTable(client, manifest, reader, reader.BaseStream.Position, directoryEnd, pathBuffer);
 
                         // skip directory data
                         reader.BaseStream.Position = directoryEnd;
@@ -305,6 +312,26 @@ namespace TACTLib.Core.VFS {
                         var before = reader.BaseStream.Position;
                         var file = ReadVfsSpanEntries(manifest, reader, out var spanSize, entry.NodeValue);
                         reader.BaseStream.Position = before;
+
+                        if (client.ConfigHandler.BuildConfig.VFSManifests != null) {
+                            var encodedIndex = 0;
+                            for (encodedIndex = 0; encodedIndex < client.ConfigHandler.BuildConfig.VFSManifests.Length; encodedIndex++) {
+                                if (client.ConfigHandler.BuildConfig.VFSManifests[encodedIndex].EncodingKey == file.EKey) {
+                                    break;
+                                }
+                            }
+
+                            if (encodedIndex != client.ConfigHandler.BuildConfig.VFSManifests.Length) {
+                                pathBuffer += "/";
+                                var subDataStream = client.OpenEKey(file.EKey, client.ConfigHandler.BuildConfig.VFSManifestsSize[encodedIndex].EncodedSize);
+                                var subDataStream2 = client.OpenEKey(file.EKey, client.ConfigHandler.BuildConfig.VFSManifestsSize[encodedIndex].EncodedSize);
+                                using BinaryReader subReader = new BinaryReader(subDataStream, Encoding.ASCII);
+                                File.WriteAllBytes($"./vfs_{file.EKey.ToHexString()}.bin", subDataStream2.ReadArray<byte>(client.ConfigHandler.BuildConfig.VFSManifestsSize[encodedIndex].ContentSize));
+                                var t_manifest = Read(client, subReader, false);
+                                manifest.Files.AddRange(t_manifest.Files);
+                                continue;
+                            }
+                        }
 
                         file.Name = pathBuffer;
 
@@ -363,9 +390,11 @@ namespace TACTLib.Core.VFS {
 
             reader.BaseStream.Position = cftFileEntry;
             var eKey = reader.Read<CKey>();
+            var encSize = reader.ReadInt32BE();
             VFSFile file = new VFSFile {
                 Offset = fileOffset,
                 ContentSize = spanSize,
+                EncodedSize = encSize,
                 Name = null,
                 EKey = eKey
             };

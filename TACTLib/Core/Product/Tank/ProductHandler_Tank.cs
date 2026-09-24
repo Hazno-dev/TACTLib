@@ -44,7 +44,7 @@ namespace TACTLib.Core.Product.Tank {
         public const int PACKAGE_IDX_FAKE_TEXT_CMF = -1;
         public const int PACKAGE_IDX_FAKE_SPEECH_CMF = -2;
         public const int PACKAGE_IDX_FAKE_ROOT_CMF = -3;
-        
+
         public const string SPEECH_MANIFEST_NAME = "speech";
         public const string TEXT_MANIFEST_NAME = "text";
 
@@ -56,11 +56,12 @@ namespace TACTLib.Core.Product.Tank {
         private const string OutdatedTACTLibErrorMessage =
             "Fatal - Manifest decryption failed. Please update TACTLib. This can happen due the game receiving a new patch that is not supported by this version of TACTLib.";
 
-        public ProductHandler_Tank(ClientHandler client, Stream stream) {
+        public ProductHandler_Tank(ClientHandler client, Stream? stream) {
             m_client = client;
 
             var clientArgs = client.CreateArgs.HandlerArgs as ClientCreateArgs_Tank ?? new ClientCreateArgs_Tank();
 
+            stream ??= client.VFS?.Open($"BuildIndex-Prometheus-{clientArgs.ManifestPlatform}.psv");
             using (var reader = new StreamReader(stream)) {
                 m_rootFiles = RootFile.ParseList(reader).ToArray();
             }
@@ -89,7 +90,7 @@ namespace TACTLib.Core.Product.Tank {
                     // filter for data region (china or global)
                     continue;
                 }
-                
+
                 var manifestLocale = GetManifestLocale(manifestName);
 
                 switch (extension) {
@@ -106,7 +107,7 @@ namespace TACTLib.Core.Product.Tank {
 
                         ContentManifestFile cmf;
                         try {
-                            using var cmfStream = client.OpenCKey(rootFile.MD5)!;
+                            using var cmfStream = client.OpenCKey(rootFile.MD5) ?? client.VFS!.Open(rootFile.FileID!)!;
                             //using (Stream file = File.OpenWrite($"{manifestName}.cmf")) {
                             //    cmfStream.CopyTo(file);
                             //}
@@ -134,13 +135,13 @@ namespace TACTLib.Core.Product.Tank {
                     case ".apm": {
                         if (manifestLocale != client.CreateArgs.TextLanguage) break; // not relevant
 
-                        using var apmStream = client.OpenCKey(rootFile.MD5)!;
+                        using var apmStream = client.OpenCKey(rootFile.MD5) ?? client.VFS!.Open(rootFile.FileID!)!;
                         m_packageManifest = new AssetPackageManifest(client, this, apmStream, manifestName);
                         break;
                     }
                     case ".trg":
                         try {
-                            using var trgStream = client.OpenCKey(rootFile.MD5)!;
+                            using var trgStream = client.OpenCKey(rootFile.MD5) ?? client.VFS!.Open(rootFile.FileID!)!;
                             //using (Stream file = File.OpenWrite($"{manifestName}.trg")) {
                             //    trgStream.CopyTo(file);
                             //}
@@ -222,7 +223,7 @@ namespace TACTLib.Core.Product.Tank {
         }
 
         public Stream? OpenFile(ContentManifestFile.HashData hashData) {
-            return m_client.OpenCKey(hashData.ContentKey);
+            return m_client.OpenCKey(hashData.ContentKey) ?? m_client.VFS?.Open(hashData.GUID.ToString("X16"));
         }
 
         /// <summary>

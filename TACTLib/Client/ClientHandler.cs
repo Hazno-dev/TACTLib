@@ -162,7 +162,7 @@ namespace TACTLib.Client {
             if (CreateArgs.OverrideVersionName != null) {
                 InstallationInfo.Values["Version"] = CreateArgs.OverrideVersionName;
             }
-            
+
             if (CreateArgs.Online) {
                 CDNClient = createArgs.CustomCDNClient ?? new HttpCDNClient(null);
                 CDNClient.SetClientHandler(this);
@@ -224,12 +224,16 @@ namespace TACTLib.Client {
             // for testing local cdn index init but remote data:
             //ContainerHandler = null;
 
-            using (var _ = new PerfCounter("EncodingHandler::ctor`ClientHandler"))
-                EncodingHandler = new EncodingHandler(this);
+            //using (var _ = new PerfCounter("EncodingHandler::ctor`ClientHandler"))
+                //EncodingHandler = new EncodingHandler(this);
 
             if (ConfigHandler.BuildConfig.VFSRoot != null && CreateArgs.LoadVFS) {
                 using var _ = new PerfCounter("VFSFileTree::ctor`ClientHandler");
-                using var vfsStream = OpenCKey(ConfigHandler.BuildConfig.VFSRoot!.ContentKey)!;
+                using var vfsStream = OpenCKey(ConfigHandler.BuildConfig.VFSRoot!.ContentKey)
+                                      ?? OpenEKey(ConfigHandler.BuildConfig.VFSRoot!.EncodingKey, ConfigHandler.BuildConfig.VFSRootSize!.EncodedSize);
+                /*if (vfsStream == null) {
+                    vfsStream = OpenEKey(ConfigHandler.BuildConfig.VFSRoot!.ContentKey, ConfigHandler.BuildConfig.VFSRootSize!.ContentSize);
+                }*/
                 VFS = new VFSFileTree(this, vfsStream);
             }
 
@@ -292,6 +296,11 @@ namespace TACTLib.Client {
                 var first = eKeys[0];
                 return TryOpenEKeyFromRemote(first, EncodingHandler.GetEncodedSize(first));
             }
+
+            /*
+            if (VFS != null) {
+                VFS.Open()
+            }*/
 
             return TryOpenRemoteLooseFile(key);
         }

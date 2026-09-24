@@ -20,17 +20,18 @@ namespace TACTLib.Client.HandlerArgs {
         /// Load manifest files. Flag here to allow disabling for development purposes
         /// </summary>
         public bool LoadManifest { get; set; } = true;
-        
+
         /// <summary>
         /// Load bundles for lookup. Flag here to allow disabling for development purposes
         /// </summary>
         public bool LoadBundlesForLookup { get; set; } = true;
-        
+
         public const string REGION_DEV = "DEV";
         public const string REGION_CN = "CN";
         public const string REGION_KR = "KR";
 
         public const string PLATFORM_WIN = "Win";
         public const string PLATFORM_WINPRISM = "WinPrism";
+        public const string PLATFORM_XBOX = "XSX";
     }
 }

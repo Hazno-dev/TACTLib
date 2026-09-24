@@ -10,7 +10,7 @@ namespace TACTLib.Config {
         protected Config(Stream? stream) {
             Values = new Dictionary<string, List<string>>();
             if (stream == null) return;
-            
+
             using (var reader = new StreamReader(stream)) {
                 Read(reader);
             }
@@ -22,8 +22,13 @@ namespace TACTLib.Config {
                 if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
                 string[] tokens = line.Split('=', StringSplitOptions.RemoveEmptyEntries);
 
-                if (tokens.Length != 2)
-                    throw new Exception("Config: tokens.Length != 2");
+                if (tokens.Length != 2) {
+                    if (tokens.Length == 3) {
+                        tokens = [tokens[0], tokens[1] + tokens[2]];
+                    } else {
+                        throw new Exception("Config: tokens.Length != 2");
+                    }
+                }
 
                 string[] values = tokens[1].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 List<string> valuesList = values.ToList();

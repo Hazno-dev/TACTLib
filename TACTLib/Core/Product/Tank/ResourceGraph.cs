@@ -107,7 +107,7 @@ namespace TACTLib.Core.Product.Tank {
             public uint m_60; // 60 - new
             public int m_graphBlockSize; // 64
             public uint m_footerMagic; // 68
-            
+
             public TRGHeader Upgrade() => new TRGHeader {
                 m_0 = m_0,
                 m_buildVersion = m_buildVersion,
@@ -160,23 +160,23 @@ namespace TACTLib.Core.Product.Tank {
 
             public uint GetNonEncryptedMagic() {
                 if (!IsEncrypted()) return m_footerMagic;
-                return BinaryPrimitives.ReverseEndianness(m_footerMagic);
+                return m_footerMagic;
             }
 
             public byte GetVersion() {
                 var shift = 24;
                 if (Is217(this)) shift = 25; // todo: why did this happen
-                
+
                 var magic = GetNonEncryptedMagic();
                 var version = magic >> shift;
-                
+
                 // if we see version lower than 11 with s17 shift, build check is wrong
                 Debug.Assert(shift < 25 || version >= 11);
                 return (byte)version;
             }
 
             public bool IsEncrypted() {
-                return (m_footerMagic >> 8) == ENCRYPTED_MAGIC;
+                return (BinaryPrimitives.ReverseEndianness(m_footerMagic) >> 8) == ENCRYPTED_MAGIC;
             }
         }
 
@@ -273,18 +273,18 @@ namespace TACTLib.Core.Product.Tank {
         public Dictionary<ulong, Skin> m_skins;
         public byte[] m_graphBlock;
         public byte[]? m_typeBundleIndexBlock;
-        
+
         public static bool Is217(TRGHeader header) {
             return header.m_buildVersion >= 139475 && // 139475 = 2.17 on pro
                    header.m_buildVersion < 141395; // 141395 = 2.18 on pro
         }
-        
+
         private static bool TryReadHeader(Stream stream, Func<Stream, TRGHeader> readHeader, byte minVersion, out TRGHeader header)
         {
             stream.Position = 0;
             header = readHeader(stream);
 
-            var magic = header.m_footerMagic >> 8;
+            var magic = BinaryPrimitives.ReverseEndianness(header.m_footerMagic) >> 8;
             if (magic != TRGHeader.ENCRYPTED_MAGIC && magic != TRGHeader.UNENCRYPTED_MAGIC)
             {
                 // footer magic isn't in the right place, we can't check the version
@@ -311,7 +311,7 @@ namespace TACTLib.Core.Product.Tank {
             // todo: this should be ordered by what?
             // header size, or version
             // todo: alt strategy: look for magic then check version
-            
+
             TRGHeader header;
             if (!TryReadHeader(stream, static stream => stream.Read<TRGHeader>(), 13, out header) &&
                 !TryReadHeader(stream, static stream => stream.Read<TRGHeader11>().Upgrade(), 11, out header) &&
@@ -321,7 +321,7 @@ namespace TACTLib.Core.Product.Tank {
                 // whatever, just try
                 stream.Position = 0;
                 header = stream.Read<TRGHeader>();
-                
+
                 Logger.Error(nameof(ResourceGraph), $"TRG header not recognised - 0x{header.m_footerMagic:X8}");
             }
 
@@ -335,6 +335,9 @@ namespace TACTLib.Core.Product.Tank {
 
                 var version = m_header.GetVersion();
                 if (version is < 5 or > 13) {
+                    stream.Position = 0;
+                    var tempBuffer = stream.ReadArray<byte>(500);
+                    Logger.Info("CASC", $"Header Bytes {Convert.ToHexString(tempBuffer)}");
                     throw new UnsupportedBuildVersionException($"unable to parse TRG. invalid version {version}, expected 5, 6, 7, 8, 9, 10, 11, 12 or 13");
                 }
 
@@ -344,15 +347,15 @@ namespace TACTLib.Core.Product.Tank {
                 // s17: no version change but 1 bit was stolen from magic (shift for version number changed)...
                 // version 12(s18): shift change undone, graph changed to raise size limit
                 // version 13: 2 u32 (+1 u32, likely padding)
-
+                ParseBlocks(reader, name);
                 var isEnc = m_header.IsEncrypted();
 
-                if (!isEnc) {
+                /*if (!isEnc) {
                     ParseBlocks(reader, name);
                 } else {
                     using (var decryptedReader = ManifestCryptoHandler.GetDecryptedReader(name, "TRG", m_header, m_header.m_buildVersion, client.Product, stream))
                         ParseBlocks(decryptedReader, name);
-                }
+                }*/
             }
 
             if (m_packages == null) throw new NullReferenceException(nameof(m_packages));
@@ -367,7 +370,7 @@ namespace TACTLib.Core.Product.Tank {
             byte[] skinBlock = reader.ReadBytes(m_header.m_skinBlockSize);
             m_graphBlock = reader.ReadBytes(m_header.m_graphBlockSize);
             if (version >= 7) {
-                m_typeBundleIndexBlock = reader.ReadBytes(m_header.m_typeBundleIndexBlockSize);
+                //m_typeBundleIndexBlock = reader.ReadBytes(m_header.m_typeBundleIndexBlockSize);
                 //File.WriteAllBytes(name + "_typeBundleIndex", m_typeBundleIndexBlock);
             }
 

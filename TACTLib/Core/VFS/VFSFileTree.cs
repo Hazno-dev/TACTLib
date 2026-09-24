@@ -25,7 +25,7 @@ namespace TACTLib.Core.VFS {
             //    stream.Position = 0;
             //}
 
-            _manifest = VFSManifestReader.Read(reader);
+            _manifest = VFSManifestReader.Read(client, reader, true);
 
             _files = new Dictionary<string, VFSFile>(_manifest.Files.Count);
             foreach (VFSFile file in _manifest.Files) {
@@ -67,11 +67,11 @@ namespace TACTLib.Core.VFS {
 				return _client.OpenCKey(cFile.CKey);
 			}
 
-			if (_client.IsStaticContainer && vfsFile.ContentSize == 0) {
+			if (_client.IsStaticContainer && vfsFile.EncodedSize == 0) {
 				throw new NotImplementedException("where esize?");
 			}
 
-			return _client.OpenEKey(vfsFile.EKey, vfsFile.ContentSize == 0 ? _client.EncodingHandler!.GetEncodedSize(vfsFile.EKey) : vfsFile.ContentSize);
+			return _client.OpenEKey(vfsFile.EKey, vfsFile.EncodedSize == 0 ? _client.EncodingHandler!.GetEncodedSize(vfsFile.EKey) : vfsFile.EncodedSize);
 		}
     }
 }
